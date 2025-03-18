@@ -35,7 +35,6 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
         registry-url: 'https://npm.pkg.github.com'
-        cache: ${{ inputs.cache }}
 
     - name: Display versions
       if: ${{ inputs.install-deps == 'true' }}
