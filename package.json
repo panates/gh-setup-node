@@ -2,7 +2,7 @@
   "private": true,
   "version": "1.0.1",
   "scripts": {
-    "tag": "npm run tag:minor && npm run tag:major",
+    "tag": "npm run tag:major && npm run tag:minor",
     "tag:major": "git tag -f v1 && git push origin v1 --force",
     "tag:minor": "git tag v$(node -p \"require('./package.json').version\") && git push origin --tags"
   }
