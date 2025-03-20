@@ -39,9 +39,9 @@ runs:
     - name: Display versions
       if: ${{ inputs.install-deps == 'true' }}
       run: |
-        echo \033[36m NodeJS version \033[39m
+        echo -e "\033[36mNodeJS version: \033[39m $(node -v)"
         node -v
-        echo \033[36m npm version \033[39m
+        echo -e "\033[36mNpm version: \033[39m $(npm -v)"
         npm -v
       shell: bash
 
@@ -73,7 +73,7 @@ runs:
       if: ${{ inputs.install-deps == 'true' }}
       run: |
         npm i rman -g
-        echo \033[36m rman version \033[39m
+        echo -e "\033[36mrman version \033[39m"
         rman -v
       shell: bash
 
