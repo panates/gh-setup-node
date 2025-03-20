@@ -1,7 +1,7 @@
 name: "Setup NodeJS Environment"
 description: "Installs NodeJS, checks out, installs dependencies"
 inputs:
-  PERSONAL_ACCESS_TOKEN:
+  token:
     description: "Github personal access token"
     required: true
   fetch-depth:
@@ -50,7 +50,7 @@ runs:
         NPMRC_FILE="$GITHUB_WORKSPACE/.npmrc"
         echo "NPMRC_FILE=$NPMRC_FILE" >> $GITHUB_ENV
         echo "@${{ github.repository_owner }}:registry=https://npm.pkg.github.com" >> "$NPMRC_FILE"
-        echo "//npm.pkg.github.com/:_authToken=${{ inputs.PERSONAL_ACCESS_TOKEN }}" >> "$NPMRC_FILE"
+        echo "//npm.pkg.github.com/:_authToken=${{ inputs.token }}" >> "$NPMRC_FILE"
       shell: bash
 
     - name: Cache Node Modules
