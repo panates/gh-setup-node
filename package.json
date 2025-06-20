@@ -1,6 +1,6 @@
 {
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.6",
   "scripts": {
     "tag": "npm run tag:version && npm run tag:major && npm run tag:push",
     "tag:version": "git tag v$(node -p \"require('./package.json').version\") -f",
