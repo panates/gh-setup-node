@@ -65,6 +65,7 @@ runs:
     - name: Install dependencies
       if: ${{ inputs.install-deps == 'true' }}
       run: |
+        rm -f package-lock.json
         npm install --no-save
         npm i rman -g
       shell: bash
