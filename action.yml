@@ -23,6 +23,11 @@ inputs:
     description: "Install dependencies"
     required: false
     default: "true"
+  github-registry:
+    description: "Create .npmrc file for organization scoped Github Packages"
+    required: false
+    default: "true"
+
 
 runs:
   using: "composite"
@@ -46,6 +51,7 @@ runs:
       shell: bash
 
     - name: Create .npmrc File for Github Packages
+      if: ${{ inputs.github-registry == 'true' }}
       run: |
         NPMRC_FILE="$GITHUB_WORKSPACE/.npmrc"
         echo "NPMRC_FILE=$NPMRC_FILE" >> $GITHUB_ENV
