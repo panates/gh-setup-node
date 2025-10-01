@@ -23,10 +23,9 @@ inputs:
     description: "Install dependencies"
     required: false
     default: "true"
-  github-registry:
-    description: "Create .npmrc file for organization scoped Github Packages"
+  github-registries:
+    description: "Private github registry names (comma separated)"
     required: false
-    default: "true"
 
 
 runs:
@@ -50,11 +49,22 @@ runs:
       shell: bash
 
     - name: Create .npmrc File for Github Packages
-      if: ${{ inputs.github-registry == 'true' }}
+      if: ${{ inputs.github-registries }}
       run: |
         NPMRC_FILE="$GITHUB_WORKSPACE/.npmrc"
         echo "NPMRC_FILE=$NPMRC_FILE" >> $GITHUB_ENV
-        echo "@${{ github.repository_owner }}:registry=https://npm.pkg.github.com" >> "$NPMRC_FILE"
+        
+        # Process comma seperated Virgülle ayrılmış registry isimlerini işle
+        IFS=',' read -ra REGISTRIES <<< "${{ inputs.github-registries }}"
+        for registry in "${REGISTRIES[@]}"; do
+          # Boşlukları temizle
+          registry=$(echo "$registry" | xargs)
+          if [ ! -z "$registry" ]; then
+            echo "@${registry}:registry=https://npm.pkg.github.com" >> "$NPMRC_FILE"
+          fi
+        done
+        
+        # Add Auth token
         echo "//npm.pkg.github.com/:_authToken=${{ inputs.token }}" >> "$NPMRC_FILE"
       shell: bash
 
