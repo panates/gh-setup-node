@@ -74,13 +74,12 @@ runs:
       with:
         path: ${{ github.workspace }}/node_modules
         key: ${{ runner.os }}-node-modules-${{ inputs.cache-key }}-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-modules-${{ inputs.cache-key }}-
 
     - name: Install dependencies
       if: ${{ inputs.install-deps == 'true' }}
       run: |
-        npm ci --no-save
+        rm -f package-lock.json
+        npm install --no-save
         npm i rman -g
       shell: bash
 
