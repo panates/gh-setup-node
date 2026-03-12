@@ -31,11 +31,11 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         fetch-depth: ${{ inputs.fetch-depth }}
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v6
       with:
         node-version: ${{ inputs.node-version }}
 
@@ -70,7 +70,7 @@ runs:
 
     - name: Cache Node Modules
       if: ${{ inputs.cache == 'true' }}
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ github.workspace }}/node_modules
         key: ${{ runner.os }}-node-modules-${{ inputs.cache-key }}-${{ hashFiles('**/package-lock.json') }}
@@ -84,7 +84,6 @@ runs:
       shell: bash
 
     - name: Install rman
-      if: ${{ inputs.install-deps == 'true' }}
       run: |
         npm i rman -g
       shell: bash
