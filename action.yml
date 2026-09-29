@@ -1,92 +1,234 @@
 name: "Setup NodeJS Environment"
-description: "Installs NodeJS, checks out, installs dependencies"
+description: "Checks out, installs NodeJS, configures npm auth, installs dependencies"
+
+# **v2 exists because v1 could not reach npm Trusted Publishing (OIDC).**
+#
+# v1 called `setup-node` with no `registry-url`, and without it npm finds no credential and never
+# attempts the OIDC exchange at all - it fails with `ENEEDAUTH`. So every workflow built on this
+# action could publish with a token and only with a token, however the calling workflow was
+# documented. Setting `registry-url` is the whole fix, and the two steps below exist to make it
+# safe: it changes *which file* npm reads, and it makes setup-node write a placeholder credential
+# that has to be removed.
+#
+# The other v1 defects fixed here: the install step deleted `package-lock.json` before installing,
+# so a release was built against freshly resolved dependency versions nobody had tested; `rman` was
+# installed globally twice, unpinned; and the GitHub Packages token was interpolated straight into
+# a shell script.
+
 inputs:
   token:
-    description: "Github personal access token"
-    required: true
+    description: "GitHub token for npm.pkg.github.com. Giving it is all that is needed to publish
+      there - the auth line is keyed by registry, not by scope. Not used for git: checkout below
+      uses the job's own GITHUB_TOKEN."
+    required: false
+    default: ""
   fetch-depth:
-    description: 'Number of commits to fetch. 0 indicates all history for all branches and tags.'
+    description: "Number of commits to fetch. 0 indicates all history for all branches and tags.
+      Release workflows need 0 - rman resolves each package's boundary from its own last tag."
+    required: false
     default: "1"
   node-version:
     description: "NodeJS version"
     required: false
     default: "lts/*"
-  cache:
-    description: "Enable or disable caching"
+  registry-url:
+    description: "Default npm registry. Leave at the default for npm Trusted Publishing (OIDC) -
+      npm only attempts the OIDC exchange when this is configured. Set to \"\" to skip npm
+      configuration entirely."
     required: false
-    default: "true"
-  cache-key:
-    description: "Unique cache key"
+    default: "https://registry.npmjs.org"
+  npm-token:
+    description: "Auth token for the registry above. Omit once the package is registered as a
+      Trusted Publisher, so OIDC is the only credential left."
     required: false
     default: ""
-  install-deps:
-    description: "Install dependencies"
+  github-registries:
+    description: "Scopes to ROUTE to npm.pkg.github.com (comma separated, without the @) - needed
+      only to INSTALL a dependency hosted there, and only when the repository commits no .npmrc of
+      its own. Publishing needs none of this: 'publishConfig.registry' routes it and 'token'
+      authenticates it. \"auto\" derives the list from what this repository publishes - see
+      scripts/github-package-scopes.mjs for what that can and cannot see."
+    required: false
+    default: ""
+  install:
+    description: "How to install dependencies: \"ci\" (from the lockfile), \"install\" (resolve
+      fresh), or \"false\" (skip)."
+    required: false
+    default: "ci"
+  cache:
+    description: "Cache the npm download cache, keyed by the lockfile. Requires a lockfile - set to
+      \"false\" in a repository that has none."
     required: false
     default: "true"
-  github-registries:
-    description: "Private github registry names (comma separated)"
+  rman-version:
+    description: "Install this major/version of rman globally, e.g. \"2\". Empty (the default)
+      installs nothing - a workflow that runs rman through npx does not need it."
     required: false
-
+    default: ""
 
 runs:
   using: "composite"
   steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
       with:
         fetch-depth: ${{ inputs.fetch-depth }}
+        # Deliberately no `token:` - the job's own GITHUB_TOKEN is what authenticates the checkout
+        # and any later `git push`. That is worth stating because v1 took a `token` input and did
+        # not pass it here either, so a caller handing over a PAT was not getting one used for git.
+        # It is also the better default: a push made with GITHUB_TOKEN does not trigger workflows,
+        # so a release workflow that pushes a bump commit does not start a second run of itself.
+        # A caller that genuinely needs a PAT for git (pushing to a protected branch) should check
+        # out itself rather than through this action.
 
-    - uses: actions/setup-node@v6
+    - uses: actions/setup-node@v7
       with:
         node-version: ${{ inputs.node-version }}
+        # **The one input this whole major version is about.** With it, npm knows which registry is
+        # the default and will ask GitHub for an OIDC token when it has no other credential.
+        registry-url: ${{ inputs.registry-url }}
+        # setup-node's own cache is the npm download cache (~/.npm), keyed by the lockfile. v1
+        # cached `node_modules` instead and then ran a full install over it unconditionally, so the
+        # cache saved nothing - and a `node_modules` tree carries compiled native modules, which are
+        # not portable across the Node versions this action is asked for.
+        cache: ${{ inputs.cache == 'true' && 'npm' || '' }}
 
     - name: Display versions
-      if: ${{ inputs.install-deps == 'true' }}
       run: |
         echo -e "\033[36mNodeJS version: \033[39m $(node -v)"
-        node -v
-        echo -e "\033[36mNpm version: \033[39m $(npm -v)"
-        npm -v
+        echo -e "\033[36mNpm version:    \033[39m $(npm -v)"
       shell: bash
 
-    - name: Create .npmrc File for Github Packages
-      if: ${{ inputs.github-registries }}
+    # **One step owns the npmrc, because there is only one right answer to "which file".**
+    #
+    # `registry-url` makes setup-node point `NPM_CONFIG_USERCONFIG` at a runner temp file, and that
+    # - not `~/.npmrc`, and not `$GITHUB_WORKSPACE/.npmrc` - is what npm reads from then on. Split
+    # this knowledge across two repositories and a calling workflow writes a token into a file npm
+    # never opens. v1 did exactly that: it wrote GitHub Packages auth into the workspace, while
+    # panates/github-actions wrote npmjs.org auth into the home directory.
+    - name: Configure npm auth
+      if: ${{ inputs.registry-url != '' }}
+      env:
+        # Through the environment, never interpolated into the script body: `${{ inputs.token }}`
+        # inside `run:` splices the secret into the shell source, where a value containing shell
+        # syntax is executed rather than written.
+        NPM_TOKEN: ${{ inputs.npm-token }}
+        GITHUB_REGISTRY_TOKEN: ${{ inputs.token }}
+        GITHUB_REGISTRIES: ${{ inputs.github-registries }}
+        REGISTRY_URL: ${{ inputs.registry-url }}
+        GITHUB_PACKAGES_HOST: npm.pkg.github.com
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        NPMRC_FILE="$GITHUB_WORKSPACE/.npmrc"
-        echo "NPMRC_FILE=$NPMRC_FILE" >> $GITHUB_ENV
-        
-        # Process comma seperated Virgülle ayrılmış registry isimlerini işle
-        IFS=',' read -ra REGISTRIES <<< "${{ inputs.github-registries }}"
-        for registry in "${REGISTRIES[@]}"; do
-          # Boşlukları temizle
-          registry=$(echo "$registry" | xargs)
-          if [ ! -z "$registry" ]; then
-            echo "@${registry}:registry=https://npm.pkg.github.com" >> "$NPMRC_FILE"
+        set -euo pipefail
+        NPMRC="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+        echo "NPMRC_FILE=$NPMRC" >> "$GITHUB_ENV"
+
+        # **Strip every credential line first, unconditionally.**
+        #
+        # `registry-url` makes setup-node write
+        #
+        #   //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+        #
+        # and with no NODE_AUTH_TOKEN that resolves to nothing. npm reads *having* an `_authToken`
+        # entry as being authenticated already, so it never reaches for OIDC, sends a credential
+        # that is not one, and the registry answers 404 (npm returns 404 rather than 403 so nobody
+        # can probe which packages exist). This is actions/setup-node#1551.
+        #
+        # Stripping also keeps a real token from ending up beside the placeholder, which would leave
+        # npm with two `_authToken` entries for one registry and no documented winner.
+        #
+        # `grep -v` into a temp file, not `sed -i`: BSD sed reads the next word as a backup suffix,
+        # so the same line is a silent no-op on macOS runners. `|| true` covers grep's exit 1 when
+        # it filters everything out.
+        if [ -f "$NPMRC" ]; then
+          grep -v ':_authToken=' "$NPMRC" > "$NPMRC.tmp" || true
+          mv "$NPMRC.tmp" "$NPMRC"
+        fi
+
+        if [ -n "$NPM_TOKEN" ]; then
+          # npm's auth key is the registry origin with the scheme dropped -
+          # `//registry.npmjs.org/:_authToken=`. **The trailing slash is not load-bearing**: npm
+          # normalizes the key, and measured against a local registry it sent
+          # `Authorization: Bearer` for both spellings. It is normalized anyway so the line is
+          # byte-identical to the one setup-node writes and the `grep -v` above strips - one
+          # canonical form in the file, whatever spelling the caller passed as registry-url.
+          key="${REGISTRY_URL#http://}"
+          key="${key#https://}"
+          key="//${key%/}/"
+          printf '%s:_authToken=%s\n' "$key" "$NPM_TOKEN" >> "$NPMRC"
+          echo "npm-token is set - publishing to $REGISTRY_URL will use it rather than OIDC."
+        else
+          echo "No npm-token - cleared the placeholder auth line, so OIDC is the only credential left."
+        fi
+
+        # **The token alone is the whole of GitHub Packages authentication**, and it is written
+        # whenever one is given rather than only alongside a scope list. npm keys an auth line by
+        # registry, not by scope - measured: with the `@scope:registry=` mapping in a project
+        # .npmrc and this line in the userconfig alone, npm sent `Authorization: Bearer`; with the
+        # line removed it sent nothing. Trusted Publishing is npmjs.org only, so there is no OIDC
+        # path here and a real token is always required.
+        #
+        # v1 wrote this line only when `github-registries` was set, which is what made every
+        # repository publishing to GitHub Packages list its scopes for a reason that did not exist.
+        if [ -n "$GITHUB_REGISTRY_TOKEN" ]; then
+          printf '//%s/:_authToken=%s\n' "$GITHUB_PACKAGES_HOST" "$GITHUB_REGISTRY_TOKEN" >> "$NPMRC"
+        fi
+
+        # Scope routing, which is a different job: it is what makes `npm ci` fetch `@scope/x` from
+        # GitHub Packages instead of npmjs.org. Publishing never needs it - `publishConfig.registry`
+        # routes that, measured with `npm publish --dry-run` and no mapping present at all.
+        if [ -n "$GITHUB_REGISTRIES" ]; then
+          if [ "$GITHUB_REGISTRIES" = "auto" ]; then
+            GITHUB_REGISTRIES=$(node "$ACTION_PATH/scripts/github-package-scopes.mjs" | paste -sd, -)
+            if [ -z "$GITHUB_REGISTRIES" ]; then
+              echo "::warning::github-registries=auto derived no scopes - no package here publishes to $GITHUB_PACKAGES_HOST. A scope this repository only *consumes* cannot be derived; list it explicitly."
+            else
+              echo "github-registries=auto derived: $GITHUB_REGISTRIES"
+            fi
           fi
-        done
-        
-        # Add Auth token
-        echo "//npm.pkg.github.com/:_authToken=${{ inputs.token }}" >> "$NPMRC_FILE"
+          IFS=',' read -ra REGISTRIES <<< "$GITHUB_REGISTRIES"
+          for registry in "${REGISTRIES[@]}"; do
+            registry=$(echo "$registry" | xargs)
+            registry="${registry#@}"
+            if [ -n "$registry" ]; then
+              printf '@%s:registry=https://%s\n' "$registry" "$GITHUB_PACKAGES_HOST" >> "$NPMRC"
+            fi
+          done
+          if [ -z "$GITHUB_REGISTRY_TOKEN" ]; then
+            echo "::warning::Scopes are routed to $GITHUB_PACKAGES_HOST but 'token' is empty - installing a private package from there will fail."
+          fi
+        fi
       shell: bash
 
-    - name: Cache Node Modules
-      if: ${{ inputs.cache == 'true' }}
-      uses: actions/cache@v5
-      with:
-        path: ${{ github.workspace }}/node_modules
-        key: ${{ runner.os }}-node-modules-${{ inputs.cache-key }}-${{ hashFiles('**/package-lock.json') }}
-
+    # **`npm ci`, not `rm -f package-lock.json && npm install`.**
+    #
+    # v1 deleted the lockfile and resolved every dependency fresh, so what CI tested and what a
+    # release shipped were built against versions no one had pinned or seen. `npm ci` was in fact
+    # introduced in 3717f92 and reverted eight minutes later by 287f13d, whose message says only
+    # "Remove restore-keys" - so the revert is undocumented and may well have been accidental.
+    #
+    # The failure to expect if it was not: `npm ci` refuses to run when package.json and
+    # package-lock.json disagree. rman does not manage lockfiles, so a repository whose versions
+    # were bumped without a `npm install --package-lock-only` afterwards has exactly that drift
+    # committed. That is a repository defect worth failing on rather than papering over - the fix is
+    # to commit the regenerated lockfile - but `install: install` is the way down for a repository
+    # that cannot do it today.
     - name: Install dependencies
-      if: ${{ inputs.install-deps == 'true' }}
+      if: ${{ inputs.install != 'false' }}
       run: |
-        rm -f package-lock.json
-        npm install --no-save
-        npm i rman -g
+        set -euo pipefail
+        if [ "${{ inputs.install }}" = "ci" ]; then
+          npm ci
+        else
+          npm install --no-save
+        fi
       shell: bash
 
+    # Opt-in and pinned. v1 ran `npm i rman -g` twice - once inside the install step and once
+    # unconditionally - at whatever `latest` happened to be, while the workflows calling it pinned
+    # every rman invocation with `npx rman@<major>`. The two agreed only by accident, and would
+    # part company the moment a new rman major reached `latest`: the build step would jump while
+    # version and publish stayed behind.
     - name: Install rman
-      run: |
-        npm i rman -g
+      if: ${{ inputs.rman-version != '' }}
+      run: npm i -g "rman@${{ inputs.rman-version }}"
       shell: bash
-
-
-
