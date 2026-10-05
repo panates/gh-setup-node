@@ -92,7 +92,7 @@ runs:
         # not portable across the Node versions this action is asked for.
         cache: ${{ inputs.cache == 'true' && 'npm' || '' }}
 
-    - name: Display versions
+    - name: Display Node version
       run: |
         echo -e "\033[36mNodeJS version: \033[39m $(node -v)"
         echo -e "\033[36mNpm version:    \033[39m $(npm -v)"
@@ -231,4 +231,11 @@ runs:
     - name: Install rman
       if: ${{ inputs.rman-version != '' }}
       run: npm i -g "rman@${{ inputs.rman-version }}"
+      shell: bash
+
+    - name: Display Repo Info
+      if: ${{ inputs.rman-version != '' }}
+      run: |
+        rman info
+        rman list
       shell: bash
