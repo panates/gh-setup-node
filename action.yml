@@ -232,10 +232,3 @@ runs:
       if: ${{ inputs.rman-version != '' }}
       run: npm i -g "rman@${{ inputs.rman-version }}"
       shell: bash
-
-    - name: Display Repo Info
-      if: ${{ inputs.rman-version != '' }}
-      run: |
-        rman info
-        rman list
-      shell: bash
