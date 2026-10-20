@@ -18,8 +18,15 @@ description: "Checks out, installs NodeJS, configures npm auth, installs depende
 inputs:
   token:
     description: "GitHub token for npm.pkg.github.com. Giving it is all that is needed to publish
-      there - the auth line is keyed by registry, not by scope. Not used for git: checkout below
-      uses the job's own GITHUB_TOKEN."
+      there - the auth line is keyed by registry, not by scope. Not used for git - that is
+      'git-token'."
+    required: false
+    default: ""
+  git-token:
+    description: "Token the checkout and every later `git push` in the job use - a GitHub App
+      installation token, for a branch whose ruleset only that App may bypass. Empty (the default)
+      keeps the job's own GITHUB_TOKEN. A push made with anything else starts workflow runs, which a
+      GITHUB_TOKEN push does not."
     required: false
     default: ""
   fetch-depth:
@@ -72,13 +79,18 @@ runs:
     - uses: actions/checkout@v7
       with:
         fetch-depth: ${{ inputs.fetch-depth }}
-        # Deliberately no `token:` - the job's own GITHUB_TOKEN is what authenticates the checkout
-        # and any later `git push`. That is worth stating because v1 took a `token` input and did
-        # not pass it here either, so a caller handing over a PAT was not getting one used for git.
-        # It is also the better default: a push made with GITHUB_TOKEN does not trigger workflows,
-        # so a release workflow that pushes a bump commit does not start a second run of itself.
-        # A caller that genuinely needs a PAT for git (pushing to a protected branch) should check
-        # out itself rather than through this action.
+        # **The job's own GITHUB_TOKEN unless `git-token` says otherwise**, and `token` (the npm
+        # one) never: v1 took a `token` input and did not pass it here either, so a caller handing
+        # over a PAT was not getting one used for git, and it should not - one secret, one job.
+        # GITHUB_TOKEN is the better default: a push made with it does not trigger workflows, so a
+        # release workflow that pushes a bump commit does not start a second run of itself.
+        #
+        # `git-token` exists for a branch protected by a ruleset: a ruleset cannot name the GitHub
+        # Actions app as a bypass actor ("Actor GitHub Actions integration must be part of the
+        # ruleset source or owner organization", measured on syncbridge-io/syncbridge), so a
+        # release pushing to it needs an App of the repository's own. Persisted (checkout's
+        # default), which is what makes a later plain `git push` use it.
+        token: ${{ inputs.git-token || github.token }}
 
     - uses: actions/setup-node@v7
       with:
