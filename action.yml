@@ -1,5 +1,5 @@
 name: "Setup NodeJS Environment"
-description: "Checks out, installs NodeJS, configures npm auth, installs dependencies"
+description: "Checks out, installs NodeJS, configures npm auth, installs dependencies with npm or pnpm"
 
 # **v2 exists because v1 could not reach npm Trusted Publishing (OIDC).**
 #
@@ -62,9 +62,17 @@ inputs:
       fresh), or \"false\" (skip)."
     required: false
     default: "ci"
+  package-manager:
+    description: "\"npm\" or \"pnpm\". Empty (the default) detects it: pnpm when the repository
+      commits a pnpm-lock.yaml, npm otherwise - so a repository that worked before this input
+      existed keeps working unchanged. A pnpm repository must name its version in
+      package.json's \"packageManager\" field (e.g. \"pnpm@11.13.1\"); that is the pnpm this
+      action installs."
+    required: false
+    default: ""
   cache:
-    description: "Cache the npm download cache, keyed by the lockfile. Requires a lockfile - set to
-      \"false\" in a repository that has none."
+    description: "Cache the package manager's download cache (npm's or pnpm's store), keyed by the
+      lockfile. Requires a lockfile - set to \"false\" in a repository that has none."
     required: false
     default: "true"
   rman-version:
@@ -72,6 +80,12 @@ inputs:
       installs nothing - a workflow that runs rman through npx does not need it."
     required: false
     default: ""
+
+outputs:
+  package-manager:
+    description: "The package manager the dependencies were installed with - \"npm\" or \"pnpm\" -
+      for a later step that has to run it again (a release syncing its lockfile, say)."
+    value: ${{ steps.package-manager.outputs.name }}
 
 runs:
   using: "composite"
@@ -92,22 +106,57 @@ runs:
         # default), which is what makes a later plain `git push` use it.
         token: ${{ inputs.git-token || github.token }}
 
+    # **From the lockfile the repository commits, unless the caller says.** The lockfile is what
+    # `install: ci` installs from, so it is also the honest answer to which tool can do that: a
+    # pnpm-lock.yaml means `npm ci` has nothing to read. Detection keeps every caller written before
+    # this step behaving exactly as it did - they all commit a package-lock.json, or no lockfile.
+    - name: Package manager
+      id: package-manager
+      env:
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+      run: |
+        set -euo pipefail
+        pm="$PACKAGE_MANAGER"
+        if [ -z "$pm" ]; then
+          if [ -f pnpm-lock.yaml ]; then pm=pnpm; else pm=npm; fi
+        fi
+        case "$pm" in
+          npm|pnpm) ;;
+          *) echo "::error::package-manager must be \"npm\" or \"pnpm\", not \"$pm\""; exit 1 ;;
+        esac
+        echo "name=$pm" >> "$GITHUB_OUTPUT"
+        echo -e "\033[36mPackage manager:\033[39m $pm"
+      shell: bash
+
+    # **Before setup-node, because its pnpm cache asks pnpm where the store is** - with no pnpm on
+    # PATH yet, `cache: pnpm` fails outright. setup-node's own documentation orders it this way.
+    # No `version`: action-setup reads package.json's `packageManager`, so CI runs the pnpm the
+    # repository pins rather than a second number kept here.
+    - uses: pnpm/action-setup@v4
+      if: ${{ steps.package-manager.outputs.name == 'pnpm' }}
+
     - uses: actions/setup-node@v7
       with:
         node-version: ${{ inputs.node-version }}
         # **The one input this whole major version is about.** With it, npm knows which registry is
         # the default and will ask GitHub for an OIDC token when it has no other credential.
         registry-url: ${{ inputs.registry-url }}
-        # setup-node's own cache is the npm download cache (~/.npm), keyed by the lockfile. v1
-        # cached `node_modules` instead and then ran a full install over it unconditionally, so the
-        # cache saved nothing - and a `node_modules` tree carries compiled native modules, which are
-        # not portable across the Node versions this action is asked for.
-        cache: ${{ inputs.cache == 'true' && 'npm' || '' }}
+        # setup-node's own cache is the package manager's download cache (~/.npm, or pnpm's
+        # store), keyed by the lockfile. v1 cached `node_modules` instead and then ran a full
+        # install over it unconditionally, so the cache saved nothing - and a `node_modules` tree
+        # carries compiled native modules, which are not portable across the Node versions this
+        # action is asked for.
+        cache: ${{ inputs.cache == 'true' && steps.package-manager.outputs.name || '' }}
 
     - name: Display Node version
+      env:
+        PACKAGE_MANAGER: ${{ steps.package-manager.outputs.name }}
       run: |
         echo -e "\033[36mNodeJS version: \033[39m $(node -v)"
         echo -e "\033[36mNpm version:    \033[39m $(npm -v)"
+        if [ "$PACKAGE_MANAGER" = pnpm ]; then
+          echo -e "\033[36mPnpm version:   \033[39m $(pnpm -v)"
+        fi
       shell: bash
 
     # **One step owns the npmrc, because there is only one right answer to "which file".**
@@ -117,6 +166,10 @@ runs:
     # this knowledge across two repositories and a calling workflow writes a token into a file npm
     # never opens. v1 did exactly that: it wrote GitHub Packages auth into the workspace, while
     # panates/github-actions wrote npmjs.org auth into the home directory.
+    #
+    # pnpm reads that same file - measured with pnpm 11: under `NPM_CONFIG_USERCONFIG` alone it
+    # resolved a scope to npm.pkg.github.com and found the `_authToken` line - so nothing below
+    # changes for a pnpm repository.
     - name: Configure npm auth
       if: ${{ inputs.registry-url != '' }}
       env:
@@ -224,15 +277,24 @@ runs:
     # committed. That is a repository defect worth failing on rather than papering over - the fix is
     # to commit the regenerated lockfile - but `install: install` is the way down for a repository
     # that cannot do it today.
+    #
+    # pnpm's counterparts: `--frozen-lockfile` refuses a lockfile that disagrees with the
+    # manifests, as `npm ci` does; `--no-frozen-lockfile` has to be said out loud, because pnpm
+    # turns frozen on by itself wherever `CI` is set - which is every GitHub runner. pnpm has no
+    # `--no-save`; what it rewrites is the runner's checkout, which nothing commits.
     - name: Install dependencies
       if: ${{ inputs.install != 'false' }}
+      env:
+        INSTALL: ${{ inputs.install }}
+        PACKAGE_MANAGER: ${{ steps.package-manager.outputs.name }}
       run: |
         set -euo pipefail
-        if [ "${{ inputs.install }}" = "ci" ]; then
-          npm ci
-        else
-          npm install --no-save
-        fi
+        case "$PACKAGE_MANAGER:$INSTALL" in
+          npm:ci)  npm ci ;;
+          npm:*)   npm install --no-save ;;
+          pnpm:ci) pnpm install --frozen-lockfile ;;
+          pnpm:*)  pnpm install --no-frozen-lockfile ;;
+        esac
       shell: bash
 
     # Opt-in and pinned. v1 ran `npm i rman -g` twice - once inside the install step and once

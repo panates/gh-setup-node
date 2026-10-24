@@ -1,14 +1,15 @@
 # Setup NodeJS Environment Action
 
 Checks out the repository, installs Node.js, configures npm authentication, and installs
-dependencies.
+dependencies with npm or pnpm.
 
 ## 🚀 Features
 
 - Checks out the repository and installs a specified version of Node.js
 - Configures npm so that **Trusted Publishing (OIDC)** actually works
 - Maps scopes to GitHub Packages (`npm.pkg.github.com`) and authenticates them
-- Installs dependencies from the lockfile, and caches npm's download cache
+- Installs dependencies from the lockfile with **npm or pnpm** (detected from the lockfile), and
+  caches its download cache
 - Optionally installs a pinned `rman` globally
 
 ## 📌 Usage
@@ -43,7 +44,14 @@ steps:
 | `npm-token`         | Auth token for that registry. **Omit it to use Trusted Publishing.**                           | `""`                         |
 | `github-registries` | Scopes to **route** to GitHub Packages, comma separated, without the `@`. `"auto"` derives them. | `""`                         |
 | `install`           | `"ci"`, `"install"`, or `"false"`.                                                             | `"ci"`                       |
-| `cache`             | Cache npm's download cache, keyed by the lockfile. Needs a lockfile.                           | `"true"`                     |
+| `package-manager`   | `"npm"` or `"pnpm"`. Empty detects it: pnpm when `pnpm-lock.yaml` is committed, npm otherwise. | `""`                         |
+| `cache`             | Cache the package manager's download cache (npm's, or pnpm's store), keyed by the lockfile. Needs a lockfile. | `"true"`                     |
+
+## 📤 Outputs
+
+| Name              | Description                                                                         |
+|-------------------|-------------------------------------------------------------------------------------|
+| `package-manager` | `"npm"` or `"pnpm"` - what the dependencies were installed with, for a later step that runs it again. |
 | `rman-version`      | Install this rman version globally, e.g. `"2"`. Empty installs nothing.                        | `""`                         |
 
 ## 🔐 npm Trusted Publishing (OIDC)
@@ -123,8 +131,13 @@ permissions:
   committing the result. `install: install` is the way down if you cannot do that today. Do not go
   back to deleting the lockfile: it means every build resolves dependency versions nobody pinned or
   tested.
-- `cache: "true"` caches npm's download cache (`~/.npm`), keyed by the lockfile. It does **not**
-  cache `node_modules`, which is not portable across Node versions.
+- `cache: "true"` caches the download cache (`~/.npm`, or pnpm's store), keyed by the lockfile. It
+  does **not** cache `node_modules`, which is not portable across Node versions.
+- **pnpm repositories** are detected from a committed `pnpm-lock.yaml` and need package.json's
+  `packageManager` field (`"pnpm@11.13.1"`): that is the pnpm `pnpm/action-setup` installs, so CI
+  runs the version the repository pins. `install: ci` runs `pnpm install --frozen-lockfile`, the
+  counterpart of `npm ci`. Authentication needs nothing extra - pnpm reads the same npmrc this
+  action writes. A repository with a `package-lock.json`, or no lockfile, behaves exactly as before.
 
 ## 🚚 Migrating from v1
 
