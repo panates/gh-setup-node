@@ -67,7 +67,9 @@ inputs:
       commits a pnpm-lock.yaml, npm otherwise - so a repository that worked before this input
       existed keeps working unchanged. A pnpm repository must name its version in
       package.json's \"packageManager\" field (e.g. \"pnpm@11.13.1\"); that is the pnpm this
-      action installs."
+      action installs. Set it before the lockfile is written, or run pnpm install again after
+      adding it: pnpm records it in the lockfile, and the frozen install \"install: ci\" runs
+      refuses a lockfile that does not match."
     required: false
     default: ""
   cache:
@@ -131,8 +133,9 @@ runs:
     # **Before setup-node, because its pnpm cache asks pnpm where the store is** - with no pnpm on
     # PATH yet, `cache: pnpm` fails outright. setup-node's own documentation orders it this way.
     # No `version`: action-setup reads package.json's `packageManager`, so CI runs the pnpm the
-    # repository pins rather than a second number kept here.
-    - uses: pnpm/action-setup@v4
+    # repository pins rather than a second number kept here. v6: v4 runs on Node 20, which GitHub
+    # forces onto Node 24 with a deprecation annotation on every job; v5+ is node24, v6.1 pnpm 12.
+    - uses: pnpm/action-setup@v6
       if: ${{ steps.package-manager.outputs.name == 'pnpm' }}
 
     - uses: actions/setup-node@v7

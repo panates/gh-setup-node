@@ -136,7 +136,10 @@ permissions:
 - **pnpm repositories** are detected from a committed `pnpm-lock.yaml` and need package.json's
   `packageManager` field (`"pnpm@11.13.1"`): that is the pnpm `pnpm/action-setup` installs, so CI
   runs the version the repository pins. `install: ci` runs `pnpm install --frozen-lockfile`, the
-  counterpart of `npm ci`. Authentication needs nothing extra - pnpm reads the same npmrc this
+  counterpart of `npm ci`. Set `packageManager` **before** the lockfile is written, or run
+  `pnpm install` again after adding it: pnpm records it in the lockfile (`packageManagerDependencies`),
+  and the frozen install refuses a lockfile that does not match (`Cannot update packageManagerDependencies
+  with "frozen-lockfile"`). Authentication needs nothing extra - pnpm reads the same npmrc this
   action writes. A repository with a `package-lock.json`, or no lockfile, behaves exactly as before.
 
 ## 🚚 Migrating from v1
