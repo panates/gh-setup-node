@@ -161,17 +161,6 @@ runs:
         # action is asked for.
         cache: ${{ inputs.cache == 'true' && steps.package-manager.outputs.name || '' }}
 
-    - name: Display Node version
-      env:
-        PACKAGE_MANAGER: ${{ steps.package-manager.outputs.name }}
-      run: |
-        echo -e "\033[36mNodeJS version: \033[39m $(node -v)"
-        echo -e "\033[36mNpm version:    \033[39m $(npm -v)"
-        if [ "$PACKAGE_MANAGER" = pnpm ]; then
-          echo -e "\033[36mPnpm version:   \033[39m $(pnpm -v)"
-        fi
-      shell: bash
-
     # **One step owns the npmrc, because there is only one right answer to "which file".**
     #
     # `registry-url` makes setup-node point `NPM_CONFIG_USERCONFIG` at a runner temp file, and that
@@ -274,6 +263,21 @@ runs:
           if [ -z "$GITHUB_REGISTRY_TOKEN" ]; then
             echo "::warning::Scopes are routed to $GITHUB_PACKAGES_HOST but 'token' is empty - installing a private package from there will fail."
           fi
+        fi
+      shell: bash
+
+    # **After "Configure npm auth", not before it.** `pnpm -v` reads the npmrc, and until that step
+    # removes it the file holds setup-node's `_authToken=${NODE_AUTH_TOKEN}` with no token behind
+    # it - so every pnpm run printed `Failed to replace env in config: ${NODE_AUTH_TOKEN}`
+    # (panates/sqb's release, 2026-10-29). npm says nothing about the same line.
+    - name: Display Node version
+      env:
+        PACKAGE_MANAGER: ${{ steps.package-manager.outputs.name }}
+      run: |
+        echo -e "\033[36mNodeJS version: \033[39m $(node -v)"
+        echo -e "\033[36mNpm version:    \033[39m $(npm -v)"
+        if [ "$PACKAGE_MANAGER" = pnpm ]; then
+          echo -e "\033[36mPnpm version:   \033[39m $(pnpm -v)"
         fi
       shell: bash
 
