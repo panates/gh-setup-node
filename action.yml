@@ -29,6 +29,13 @@ inputs:
       GITHUB_TOKEN push does not."
     required: false
     default: ""
+  ref:
+    description: "Branch, tag or SHA to check out. Empty (the default) is the commit the workflow
+      run was handed - actions/checkout's own default. A release workflow passes the branch name, so
+      that \"Re-run failed jobs\" starts from the release commit an earlier attempt pushed rather
+      than from a commit that is now behind it."
+    required: false
+    default: ""
   fetch-depth:
     description: "Number of commits to fetch. 0 indicates all history for all branches and tags.
       Release workflows need 0 - rman resolves each package's boundary from its own last tag."
@@ -107,6 +114,9 @@ runs:
         # release pushing to it needs an App of the repository's own. Persisted (checkout's
         # default), which is what makes a later plain `git push` use it.
         token: ${{ inputs.git-token || github.token }}
+        # Empty is checkout's own default (the run's commit). See the input for why a release
+        # workflow passes its branch.
+        ref: ${{ inputs.ref }}
 
     # **From the lockfile the repository commits, unless the caller says.** The lockfile is what
     # `install: ci` installs from, so it is also the honest answer to which tool can do that: a

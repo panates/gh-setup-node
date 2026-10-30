@@ -38,6 +38,7 @@ steps:
 |---------------------|-----------------------------------------------------------------------------------------------|------------------------------|
 | `token`             | GitHub token, used **only** for `npm.pkg.github.com`. Required when `github-registries` is set. | `""`                         |
 | `git-token`         | Token for the checkout and every later `git push` - a GitHub App token, for a branch only that App may bypass. Empty uses the job's `GITHUB_TOKEN`. | `""`                         |
+| `ref`               | Branch, tag or SHA to check out. Empty is the commit the run was handed; a release workflow passes its branch so a re-run starts from the release commit. | `""`                         |
 | `fetch-depth`       | Commits to fetch. `0` means all history **and tags**.                                          | `"1"`                        |
 | `node-version`      | Node.js version.                                                                               | `"lts/*"`                    |
 | `registry-url`      | Default npm registry. Leave as-is for OIDC; `""` skips npm configuration entirely.             | `https://registry.npmjs.org` |
